@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block title %}Report · Guardian{% endblock %}
+
+{% block content %}
+
+<div class="section">Today's Snapshot</div>
+<div class="grid cards-4">
+  <div class="card ok">
+    <div class="card-head">
+      <span class="card-label">Average Temperature</span>
+      <span class="card-icon">🌡️</span>
+    </div>
+    <div class="card-value" id="stat-avg-temp">—</div>
+    <div class="card-sub" id="stat-temp-range">—</div>
+  </div>
+
+  <div class="card info">
+    <div class="card-head">
+      <span class="card-label">Lamp Hours</span>
+      <span class="card-icon">💡</span>
+    </div>
+    <div class="card-value" id="stat-led-hours">—</div>
+    <div class="card-sub" id="stat-led-pct">—</div>
+  </div>
+
+  <div class="card info">
+    <div class="card-head">
+      <span class="card-label">Occupied Hours</span>
+      <span class="card-icon">🚶</span>
+    </div>
+    <div class="card-value" id="stat-occ-hours">—</div>
+    <div class="card-sub" id="stat-motion-hours-sub">—</div>
+  </div>
+
+  <div class="card warn">
+    <div class="card-head">
+      <span class="card-label">Away Alerts · 7 days</span>
+      <span class="card-icon">🚨</span>
+    </div>
+    <div class="card-value" id="stat-alerts">—</div>
+    <div class="card-sub">Intruder events logged</div>
+  </div>
+</div>
+
+<div class="section">Temperature · Today <span class="count">· hourly average</span></div>
+<div class="chart-wrap sm">
+  <canvas id="tempChart"></canvas>
+</div>
+
+<div class="section">Motion Activity <span class="count">· last 24 hours</span></div>
+<div class="chart-wrap sm">
+  <canvas id="motionChart"></canvas>
+</div>
+
+<div class="section">Events Breakdown <span class="count">· today</span></div>
+<div class="chart-wrap sm">
+  <canvas id="eventsChart"></canvas>
+</div>
+
+<div class="section">Insights</div>
+<div class="events-list" id="insights">
+  <div class="empty"><div class="empty-icon">🧠</div>Analyzing your data…</div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const gridColor = 'rgba(143,160,189,.06)';
+const tickFont  = { family: 'JetBrains Mono', size: 10 };
+const tickColor = '#5b6b88';
+
+/* ---------- Temperature line ---------- */
+const tempChart = new Chart(document.getElementById('tempChart').getContext('2d'), {
+  type: 'line',
+  data: { labels: [], datasets: [{
+    label: 'Average °C', data: [],
+    borderColor: '#f43f5e', borderWidth: 2, tension: .4,
+    pointRadius: 3, pointHoverRadius: 5,
+    pointBackgroundColor: '#f43f5e',
+    pointBorderColor: '#0f1524', pointBorderWidth: 2,
+    fill: true,
+    backgroundColor: (ctx) => {
+      const {chart} = ctx;
+      const {ctx: c, chartArea} = chart;
+      if (!chartArea) return 'rgba(244,63,94,.1)';
+      const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+      g.addColorStop(0, 'rgba(244,63,94,.3)');
+      g.addColorStop(1, 'rgba(244,63,94,0)');
+      return g;
+    }
+  }]},
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: {duration: 400},
+    plugins: {
+      legend: { display: false },
+      tooltip: { backgroundColor: 'rgba(15,21,36,.95)',
+                 borderColor: '#2c3a58', borderWidth: 1,
+                 padding: 10, cornerRadius: 8 }
+    },
+    scales: {
+      x: { ticks: { color: tickColor, font: tickFont },
+           grid: { display: false } },
+      y: { beginAtZero: false,
+           ticks: { color: tickColor, font: tickFont },
+           grid: { color: gridColor } }
+    }
+  }
+});
+
+/* ---------- Motion bar ---------- */
+const motionChart = new Chart(document.getElementById('motionChart').getContext('2d'), {
+  type: 'bar',
+  data: { labels: [], datasets: [{
+    label: 'Motion events', data: [],
+    backgroundColor: (ctx) => {
+      const {chart} = ctx;
+      const {ctx: c, chartArea} = chart;
+      if (!chartArea) return 'rgba(96,165,250,.6)';
+      const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+      g.addColorStop(0, 'rgba(96,165,250,.9)');
+      g.addColorStop(1, 'rgba(96,165,250,.35)');
+      return g;
+    },
+    borderColor: '#60a5fa', borderWidth: 1, borderRadius: 5,
+  }]},
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: {duration: 400},
+    plugins: {
+      legend: { display: false },
+      tooltip: { backgroundColor: 'rgba(15,21,36,.95)',
+                 borderColor: '#2c3a58', borderWidth: 1,
+                 padding: 10, cornerRadius: 8 }
+    },
+    scales: {
+      x: { ticks: { color: tickColor, maxTicksLimit: 12, font: tickFont },
+           grid: { display: false } },
+      y: { beginAtZero: true,
+           ticks: { color: tickColor, font: tickFont },
+           grid: { color: gridColor } }
+    }
+  }
+});
+
+/* ---------- Events doughnut ---------- */
+const eventsChart = new Chart(document.getElementById('eventsChart').getContext('2d'), {
+  type: 'doughnut',
+  data: { labels: [], datasets: [{
+    data: [],
+    backgroundColor: [
+      '#f43f5e','#fbbf24','#60a5fa','#10b981',
+      '#a78bfa','#fb923c','#22d3ee','#eab308'
+    ],
+    borderWidth: 3, borderColor: '#0f1524',
+    hoverOffset: 8
+  }]},
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: {duration: 400},
+    cutout: '62%',
+    plugins: {
+      legend: { position: 'right',
+                labels: { color: '#8fa0bd', padding: 14,
+                          boxWidth: 10, boxHeight: 10,
+                          usePointStyle: true, pointStyle: 'circle',
+                          font: { family: 'Inter', size: 11.5 } } },
+      tooltip: { backgroundColor: 'rgba(15,21,36,.95)',
+                 borderColor: '#2c3a58', borderWidth: 1,
+                 padding: 10, cornerRadius: 8 }
+    }
+  }
+});
+
+/* ---------- data load ---------- */
+async function loadStats(){
+  const stats = await fetch('/api/stats').then(r => r.json());
+
+  document.getElementById('stat-avg-temp').textContent = stats.today.avg_temp + '°C';
+  document.getElementById('stat-temp-range').textContent =
+    `min ${stats.today.min_temp}°C · max ${stats.today.max_temp}°C`;
+
+  document.getElementById('stat-led-hours').textContent = stats.today.led_hours + ' h';
+  const pct = stats.today.total_hours > 0
+    ? (stats.today.led_hours / stats.today.total_hours * 100).toFixed(0) : 0;
+  document.getElementById('stat-led-pct').textContent =
+    `${pct}% of logged time · avg light ${stats.today.avg_light}`;
+
+  document.getElementById('stat-occ-hours').textContent = stats.today.occupied_hours + ' h';
+  document.getElementById('stat-motion-hours-sub').textContent =
+    `motion detected ${stats.today.motion_hours} h`;
+
+  document.getElementById('stat-alerts').textContent = stats.week.alerts;
+
+  tempChart.data.labels = stats.temp_by_hour.map(r => r.hour);
+  tempChart.data.datasets[0].data = stats.temp_by_hour.map(r => r.avg_t.toFixed(1));
+  tempChart.update('none');
+
+  motionChart.data.labels = stats.motion_by_hour.map(r => {
+    const parts = r.hour.split(' ');
+    return (parts[1] || r.hour).substring(0, 5);
+  });
+  motionChart.data.datasets[0].data = stats.motion_by_hour.map(r => r.cnt);
+  motionChart.update('none');
+
+  eventsChart.data.labels = stats.events_by_type.map(e =>
+    (e.event_type || '').replace(/_/g,' '));
+  eventsChart.data.datasets[0].data = stats.events_by_type.map(e => e.cnt);
+  eventsChart.update('none');
+
+  renderInsights(stats);
+}
+
+function renderInsights(s){
+  const items = [];
+
+  if (s.today.avg_temp > 26) {
+    items.push({ sev:'warning', icon:'🌡️', title:'Warm room',
+      msg:`Average temperature today was ${s.today.avg_temp}°C. Consider ventilating more often.` });
+  } else if (s.today.avg_temp < 19 && s.today.avg_temp > 0) {
+    items.push({ sev:'info', icon:'❄️', title:'Cold room',
+      msg:`Average temperature today was ${s.today.avg_temp}°C. You might want to heat the room.` });
+  } else if (s.today.avg_temp > 0) {
+    items.push({ sev:'info', icon:'✅', title:'Comfortable temperature',
+      msg:`Average of ${s.today.avg_temp}°C today — within the comfortable range.` });
+  }
+
+  if (s.today.led_hours > 4) {
+    items.push({ sev:'warning', icon:'💡', title:'Lamp left on for a long time',
+      msg:`The desk lamp was on for ${s.today.led_hours} h today. Check for unnecessary usage.` });
+  } else if (s.today.led_hours > 0) {
+    const pct = (s.today.led_hours / Math.max(s.today.total_hours,1) * 100).toFixed(0);
+    items.push({ sev:'info', icon:'💡', title:'Lamp usage',
+      msg:`Lamp was on for ${s.today.led_hours} h today — ${pct}% of logged time.` });
+  }
+
+  if (s.week.alerts > 0) {
+    items.push({ sev:'critical', icon:'🚨',
+      title:`${s.week.alerts} intruder alert${s.week.alerts>1?'s':''} this week`,
+      msg:'Motion was detected while away mode was enabled. Review the events timeline.' });
+  }
+
+  if (s.today.vent_hours > 0.5) {
+    items.push({ sev:'warning', icon:'🌀', title:'Vent frequently open',
+      msg:`Vent was open for ${s.today.vent_hours} h today. Room may be running hot.` });
+  }
+
+  if (s.motion_by_hour && s.motion_by_hour.length) {
+    const peak = s.motion_by_hour.reduce((a,b) => a.cnt > b.cnt ? a : b);
+    if (peak.cnt > 0) {
+      const hour = (peak.hour.split(' ')[1] || '').substring(0,5);
+      items.push({ sev:'info', icon:'📊', title:'Busiest hour',
+        msg:`Peak motion activity at ${hour} with ${peak.cnt} events.` });
+    }
+  }
+
+  items.push({ sev:'info', icon:'⚙️', title:'Sample interval',
+    msg:`Dashboard computed a sample interval of ${s.sample_interval.toFixed(2)} s from the database.` });
+
+  const el = document.getElementById('insights');
+  el.innerHTML = items.map(i => `
+    <div class="event ${i.sev}">
+      <div class="event-icon ${i.sev}">${i.icon}</div>
+      <div class="event-body">
+        <div class="event-title">${i.title}</div>
+        <div class="event-msg">${i.msg}</div>
+      </div>
+    </div>`).join('');
+}
+
+loadStats();
+setInterval(loadStats, 5000);
+</script>
+{% endblock %}

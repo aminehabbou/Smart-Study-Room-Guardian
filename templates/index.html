@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+{% block title %}Live · Guardian{% endblock %}
+
+{% block content %}
+
+<div class="section">Current Status</div>
+<div class="grid cards-6">
+  <div class="card" id="card-temp">
+    <div class="card-head">
+      <span class="card-label">Temperature</span>
+      <span class="card-icon">🌡️</span>
+    </div>
+    <div class="card-value" id="val-temp">—</div>
+    <div class="range"><div class="range-fill" id="bar-temp" style="width:0"></div></div>
+    <div class="card-sub" style="margin-top:10px">
+      <span class="badge info" id="badge-temp">—</span>
+    </div>
+  </div>
+
+  <div class="card" id="card-light">
+    <div class="card-head">
+      <span class="card-label">Light</span>
+      <span class="card-icon">💡</span>
+    </div>
+    <div class="card-value" id="val-light">—</div>
+    <div class="range"><div class="range-fill" id="bar-light" style="width:0"></div></div>
+    <div class="card-sub" style="margin-top:10px">
+      <span class="badge info" id="badge-light">—</span>
+    </div>
+  </div>
+
+  <div class="card" id="card-motion">
+    <div class="card-head">
+      <span class="card-label">Motion</span>
+      <span class="card-icon">👁️</span>
+    </div>
+    <div class="card-value" id="val-motion">—</div>
+    <div class="card-sub"><span class="badge info" id="badge-motion">—</span></div>
+  </div>
+
+  <div class="card" id="card-occ">
+    <div class="card-head">
+      <span class="card-label">Occupancy</span>
+      <span class="card-icon">🚶</span>
+    </div>
+    <div class="card-value" id="val-occ">—</div>
+    <div class="card-sub"><span class="badge info" id="badge-occ">—</span></div>
+  </div>
+
+  <div class="card" id="card-led">
+    <div class="card-head">
+      <span class="card-label">Desk Lamp</span>
+      <span class="card-icon">🔆</span>
+    </div>
+    <div class="card-value" id="val-led">—</div>
+    <div class="card-sub"><span class="badge info" id="badge-led">—</span></div>
+  </div>
+
+  <div class="card" id="card-vent">
+    <div class="card-head">
+      <span class="card-label">Vent</span>
+      <span class="card-icon">🌀</span>
+    </div>
+    <div class="card-value" id="val-vent">—</div>
+    <div class="card-sub"><span class="badge info" id="badge-vent">—</span></div>
+  </div>
+</div>
+
+<div class="section">Mode</div>
+<div class="card" id="card-away" style="max-width:520px">
+  <div class="card-head">
+    <span class="card-label">Away Mode</span>
+    <span class="card-icon">🔐</span>
+  </div>
+  <div class="card-value" id="val-away">—</div>
+  <div class="card-sub" id="sub-away">—</div>
+</div>
+
+<div class="section">Live Readings <span class="count">· last 60 samples</span></div>
+<div class="chart-wrap">
+  <canvas id="liveChart"></canvas>
+</div>
+
+<div class="section">Recent Events <span class="count" id="events-count">· 0</span></div>
+<div class="events-list" id="events-list">
+  <div class="empty"><div class="empty-icon">📭</div>Waiting for data…</div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CONFIG = {
+  // ----- Temperature (°C) -----
+  TEMP_COLD:       18,     // below this = "Cold"
+  TEMP_WARN:       23,     // above this = "Warm"
+  TEMP_ALERT:      25,     // above this = "Critical"
+  TEMP_BAR_MIN:    15,     // left edge of the temperature range bar
+  TEMP_BAR_MAX:    35,     // right edge of the temperature range bar
+
+  // ----- Light (0–1023) -----
+  LIGHT_VERY_DARK: 100,    // below this = "Very dark"
+  LIGHT_DARK:      600,    // below this = "Dark"     (matches Arduino)
+  LIGHT_DIM:       700,    // below this = "Dim"
+  LIGHT_BAR_MAX:   1023,   // full scale of the light range bar
+
+  // ----- API refresh -----
+  REFRESH_MS:      2000,   // dashboard poll rate
+};
+
+/* ---------- chart ---------- */
+const liveChart = new Chart(document.getElementById('liveChart').getContext('2d'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label: 'Temperature (°C)', data: [],
+      borderColor: '#f43f5e', borderWidth: 2, tension: .35,
+      pointRadius: 0, pointHoverRadius: 4, yAxisID: 'y',
+      fill: true,
+      backgroundColor: (ctx) => {
+        const {chart} = ctx;
+        const {ctx: c, chartArea} = chart;
+        if (!chartArea) return 'rgba(244,63,94,.1)';
+        const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+        g.addColorStop(0, 'rgba(244,63,94,.25)');
+        g.addColorStop(1, 'rgba(244,63,94,0)');
+        return g;
+      }
+    },
+    { label: 'Light (0–1023)', data: [],
+      borderColor: '#fbbf24', borderWidth: 2, tension: .35,
+      pointRadius: 0, pointHoverRadius: 4, yAxisID: 'y1',
+      fill: false }
+  ]},
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: {duration: 300},
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { position: 'top', align: 'end',
+                labels: { color: '#8fa0bd', boxWidth: 8, boxHeight: 8,
+                          usePointStyle: true, pointStyle: 'circle',
+                          font: { family: 'Inter', size: 11.5, weight: '500' } } },
+      tooltip: { backgroundColor: 'rgba(15,21,36,.95)',
+                 borderColor: '#2c3a58', borderWidth: 1,
+                 titleColor: '#eef2f8', bodyColor: '#8fa0bd',
+                 padding: 10, cornerRadius: 8, boxPadding: 6 }
+    },
+    scales: {
+      x: { ticks: { color: '#5b6b88', maxTicksLimit: 8,
+                    font: { family: 'JetBrains Mono', size: 10 } },
+           grid: { color: 'rgba(143,160,189,.06)', drawTicks: false } },
+      y: { position: 'left',
+           title: { display: true, text: '°C', color: '#f43f5e',
+                    font: { family: 'Inter', size: 11, weight: '500' } },
+           ticks: { color: '#5b6b88', font: { family: 'JetBrains Mono', size: 10 } },
+           grid: { color: 'rgba(143,160,189,.06)', drawTicks: false } },
+      y1: { position: 'right', min: 0, max: 1023,
+            title: { display: true, text: 'light', color: '#fbbf24',
+                     font: { family: 'Inter', size: 11, weight: '500' } },
+            ticks: { color: '#5b6b88', font: { family: 'JetBrains Mono', size: 10 } },
+            grid: { display: false } }
+    }
+  }
+});
+
+/* ---------- helpers ---------- */
+const SEVERITY_ICON = { info: 'ℹ️', warning: '⚠️', critical: '🚨' };
+const EVENT_LABEL = {
+  led_on: 'Desk lamp on',       led_off: 'Desk lamp off',
+  vent_open: 'Vent opened',     vent_close: 'Vent closed',
+  away_on: 'Away mode ON',      away_off: 'Away mode OFF',
+  intruder_alert: 'Intruder alert',
+  heat_warning: 'Heat warning', heat_alert: 'Heat alert', heat_cleared: 'Heat cleared',
+  light_low: 'Light dropped',   light_ok: 'Light restored'
+};
+
+function setValue(id, value){
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (el.textContent !== value){
+    el.textContent = value;
+    const card = el.closest('.card');
+    if (card){
+      card.classList.remove('changed');
+      void card.offsetWidth;
+      card.classList.add('changed');
+    }
+  }
+}
+function setCard(id, cls){
+  const el = document.getElementById(id);
+  if (el) el.className = 'card ' + cls;
+}
+function setBadge(id, text, cls){
+  const el = document.getElementById(id);
+  if (el){ el.className = 'badge ' + cls; el.textContent = text; }
+}
+function setRange(id, pct, cls=''){
+  const el = document.getElementById(id);
+  if (el){
+    el.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    el.className = 'range-fill ' + cls;
+  }
+}
+
+/* ---------- cards ---------- */
+function renderCards(c){
+  if (!c || c.temperature === undefined) return;
+
+  // ===== Temperature =====
+  const t = c.temperature;
+  setValue('val-temp', t.toFixed(1) + '°C');
+
+  let cls='ok', txt='Comfortable';
+  if (t < CONFIG.TEMP_COLD)        { cls='info';  txt='Cold'; }
+  else if (t > CONFIG.TEMP_ALERT)  { cls='alert'; txt='Critical'; }
+  else if (t > CONFIG.TEMP_WARN)   { cls='warn';  txt='Warm'; }
+
+  setCard('card-temp', cls); setBadge('badge-temp', txt, cls);
+
+  const tempPct = ((t - CONFIG.TEMP_BAR_MIN) /
+                   (CONFIG.TEMP_BAR_MAX - CONFIG.TEMP_BAR_MIN)) * 100;
+  setRange('bar-temp', tempPct,
+           cls === 'warn' ? 'warn' : cls === 'alert' ? 'alert' : '');
+
+  // ===== Light =====
+  const l = c.light;
+  setValue('val-light', l);
+
+  let lcls='ok', ltxt='Bright';
+  if (l < CONFIG.LIGHT_VERY_DARK)      { lcls='alert'; ltxt='Very dark'; }
+  else if (l < CONFIG.LIGHT_DARK)      { lcls='warn';  ltxt='Dark'; }
+  else if (l < CONFIG.LIGHT_DIM)       { lcls='info';  ltxt='Dim'; }
+
+  setCard('card-light', lcls); setBadge('badge-light', ltxt, lcls);
+  setRange('bar-light', (l / CONFIG.LIGHT_BAR_MAX) * 100,
+           lcls === 'warn' ? 'warn' : lcls === 'alert' ? 'alert' : '');
+
+  // ===== Motion =====
+  setValue('val-motion', c.motion ? 'Detected' : 'None');
+  const mcls = c.motion ? 'warn' : 'ok';
+  setCard('card-motion', mcls);
+  setBadge('badge-motion', c.motion ? 'Now' : 'Quiet', mcls);
+
+  // ===== Occupancy =====
+  setValue('val-occ', c.occupied ? 'Occupied' : 'Empty');
+  const ocls = c.occupied ? 'ok' : 'info';
+  setCard('card-occ', ocls);
+  setBadge('badge-occ', c.occupied ? 'Someone here' : 'Nobody', ocls);
+
+  // ===== LED =====
+  setValue('val-led', c.led ? 'ON' : 'OFF');
+  const ledcls = c.led ? 'ok' : 'info';
+  setCard('card-led', ledcls);
+  setBadge('badge-led', c.led ? 'On' : 'Off', ledcls);
+
+  // ===== Vent =====
+  setValue('val-vent', c.vent ? 'OPEN' : 'Closed');
+  const vcls = c.vent ? 'warn' : 'ok';
+  setCard('card-vent', vcls);
+  setBadge('badge-vent', c.vent ? 'Open' : 'Closed', vcls);
+
+  // ===== Away =====
+  setValue('val-away', c.away ? '🏃 AWAY' : '🏠 HOME');
+  document.getElementById('sub-away').textContent = c.away
+    ? 'Armed — motion triggers the intruder alarm'
+    : 'Normal — motion keeps the desk lamp on when dark';
+  setCard('card-away', c.away ? 'warn' : 'ok');
+
+  // ===== Header timestamp =====
+  const pill = document.getElementById('last-update');
+  if (pill){
+    const d = new Date(c.ts);
+    pill.textContent = 'live · ' + d.toLocaleTimeString(
+      [], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  }
+}
+
+function renderChart(rows){
+  if (!rows || !rows.length) return;
+  liveChart.data.labels = rows.map(r => {
+    const d = new Date(r.ts);
+    return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  });
+  liveChart.data.datasets[0].data = rows.map(r => r.temperature);
+  liveChart.data.datasets[1].data = rows.map(r => r.light);
+  liveChart.update('none');
+}
+
+function renderEvents(events){
+  const list = document.getElementById('events-list');
+  const count = document.getElementById('events-count');
+  if (count) count.textContent = '· ' + (events ? events.length : 0);
+
+  if (!events || !events.length){
+    list.innerHTML = '<div class="empty"><div class="empty-icon">📭</div>No events yet</div>';
+    return;
+  }
+  list.innerHTML = events.map(e => {
+    const icon = SEVERITY_ICON[e.severity] || '•';
+    const label = EVENT_LABEL[e.event_type] || e.event_type;
+    const ts = new Date(e.ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const value = (e.value !== null && e.value !== undefined)
+      ? ` · ${Number(e.value).toFixed(1)}°C` : '';
+    return `
+      <div class="event ${e.severity}">
+        <div class="event-icon ${e.severity}">${icon}</div>
+        <div class="event-body">
+          <div class="event-title">${label}</div>
+          <div class="event-msg">${e.message || ''}${value}</div>
+        </div>
+        <div class="event-ts">${ts}</div>
+      </div>`;
+  }).join('');
+}
+
+async function refresh(){
+  try {
+    const [current, live, events] = await Promise.all([
+      fetch('/api/current').then(r => r.json()),
+      fetch('/api/live').then(r => r.json()),
+      fetch('/api/events').then(r => r.json()),
+    ]);
+    renderCards(current); renderChart(live); renderEvents(events);
+  } catch (e){ console.error('refresh failed', e); }
+}
+
+refresh();
+setInterval(refresh, CONFIG.REFRESH_MS);
+</script>
+{% endblock %}
