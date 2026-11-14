@@ -1,0 +1,118 @@
+#include <DHT.h>
+#include <Servo.h>
+
+// ---------------- Pin definitions ----------------
+#define DHTPIN     2
+#define DHTTYPE    DHT11
+#define LDR_PIN    A0
+#define PIR_PIN    3
+#define BUTTON_PIN 4
+#define BUZZER_PIN 5
+#define LED_PIN    6
+#define SERVO_PIN  8
+
+// ---------------- Thresholds ----------------
+
+const int   LIGHT_THRESHOLD   = 600;    
+const float TEMP_HIGH         = 23;   
+const float TEMP_ALERT        = 25;   
+const unsigned long NO_MOTION_TIMEOUT = 5000;   
+
+// ---------------- Servo angles ----------------
+const int VENT_CLOSED = 0;
+const int VENT_OPEN   = 90;
+
+DHT dht(DHTPIN, DHTTYPE);
+Servo ventServo;
+
+// ---------------- State variables ----------------
+bool awayMode = false;
+bool lastButtonState = HIGH;
+unsigned long lastMotionTime = 0;
+bool ventOpen = false;
+bool ledOn = false;
+
+// ----------------------------------------------------------------
+void setup() {
+  Serial.begin(9600);
+  dht.begin();
+
+  pinMode(PIR_PIN, INPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);   // internal pull-up
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+
+  ventServo.attach(SERVO_PIN);
+  ventServo.write(VENT_CLOSED);
+
+  Serial.println("=== Smart Study Room Guardian ===");
+  Serial.println("temp,light,motion,occupied,led,vent,away");
+  delay(2000);   // DHT11 warm-up
+}
+
+// ----------------------------------------------------------------
+void loop() {
+  // ---------- Read sensors ----------
+  float temperature = dht.readTemperature();
+  int lightLevel = analogRead(LDR_PIN);
+  int motion = digitalRead(PIR_PIN);
+
+  // ---------- Away mode toggle (button) ----------
+  bool buttonState = digitalRead(BUTTON_PIN);
+  if (buttonState == LOW && lastButtonState == HIGH) {
+    awayMode = !awayMode;
+    if (awayMode) {
+      digitalWrite(LED_PIN, LOW);     // force LED off immediately
+    }
+    Serial.print("Away mode: ");
+    Serial.println(awayMode ? "ON" : "OFF");
+  }
+  lastButtonState = buttonState;
+
+  // ---------- Motion tracking ----------
+  if (motion == HIGH) {
+    lastMotionTime = millis();
+  }
+  // occupied is only true when NOT away
+  bool occupied = (!awayMode) && ((millis() - lastMotionTime) < NO_MOTION_TIMEOUT);
+
+  // ---------- LED: on if occupied AND dark AND not away ----------
+  ledOn = (occupied && lightLevel < LIGHT_THRESHOLD && !awayMode);
+  digitalWrite(LED_PIN, ledOn ? HIGH : LOW);
+
+  // ---------- Vent: open if too hot ----------
+  if (temperature > TEMP_HIGH && !ventOpen) {
+    ventServo.write(VENT_OPEN);
+    ventOpen = true;
+  } else if (temperature <= TEMP_HIGH && ventOpen) {
+    ventServo.write(VENT_CLOSED);
+    ventOpen = false;
+  }
+
+  // ---------- Buzzer ----------
+  if (awayMode && motion == HIGH) {
+    tone(BUZZER_PIN, 1000, 300);       // intruder alert
+  } else if (temperature > TEMP_ALERT) {
+    tone(BUZZER_PIN, 600, 150);        // heat warning
+  } else {
+    noTone(BUZZER_PIN);
+  }
+
+  // ---------- Serial CSV output ----------
+  // Format: temp,light,motion,occupied,led,vent,away
+  Serial.print(temperature);
+  Serial.print(",");
+  Serial.print(lightLevel);
+  Serial.print(",");
+  Serial.print(motion);
+  Serial.print(",");
+  Serial.print(occupied ? 1 : 0);
+  Serial.print(",");
+  Serial.print(ledOn ? 1 : 0);
+  Serial.print(",");
+  Serial.print(ventOpen ? 1 : 0);
+  Serial.print(",");
+  Serial.println(awayMode ? 1 : 0);
+
+  delay(2000);   // DHT11 needs ≥2 s between reads
+}
